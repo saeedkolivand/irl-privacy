@@ -1,0 +1,6 @@
+av==18.1.0
+faster-whisper==1.2.1
+numpy==2.5.3
+onnx==1.22.0
+onnxruntime-gpu==1.30.0
+opencv-python==5.0.0.93

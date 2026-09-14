@@ -1,0 +1,40 @@
+# Virtualenv (6.8 GB of CUDA wheels)
+.venv/
+venv/
+env/
+
+# Model weights (71 MB). Fetched by fetch_models.py -- deliberately not vendored: the barcode
+# model is AGPL-3.0, and redistributing weights drags their licences into this repo.
+models/
+
+# Footage. Raw Feed frames must never be committed (ADR 0002), and the stock test clips are
+# 1.1 GB of Pexels material that belongs on Pexels, not here.
+test-footage/
+*.mp4
+*.mov
+*.MOV
+*.mkv
+*.ts
+*.webm
+*.wav
+
+# Anything a debug run wrote. --debug-words logs transcribed speech; it must never be committed.
+*.log
+*.out
+scratch/
+scratchpad/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
