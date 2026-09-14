@@ -19,7 +19,7 @@ import numpy as np
 import redact
 import speech
 
-DELAY = 3.0     # Privacy Buffer seconds (D5); Streamlabs Alert Delay must match
+DELAY = 3.0     # Privacy Buffer seconds; Streamlabs Alert Delay must match
 REANCHOR = 0.5  # seconds of drift between phone clock and arrival clock before re-syncing
 W, H, FPS, RATE = 720, 1280, 30, 48000
 MS, SAMPLE = Fraction(1, 1000), Fraction(1, RATE)
@@ -262,7 +262,7 @@ def selftest():
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--listen", default="rtmp://100.124.231.50:1935/live", help="RTMP URL the phone publishes to (PC's Tailscale IP)")
+    p.add_argument("--listen", help="RTMP URL the phone publishes to, e.g. rtmp://<your-tailscale-ip>:1935/live")
     p.add_argument("--out", default="udp://127.0.0.1:9000?pkt_size=1316", help="Clean Feed destination for OBS")
     p.add_argument("--panic-port", type=int, default=8765, help="port for the panic endpoint")
     p.add_argument("--debug-words", action="store_true",
@@ -271,6 +271,8 @@ def main():
     args = p.parse_args()
     if args.selftest:
         return selftest()
+    if not args.listen:
+        p.error("--listen is required, e.g. rtmp://<your-tailscale-ip>:1935/live")
     if args.debug_words:
         speech.DEBUG = True
         print("!! --debug-words is ON: transcribed speech is being written to this log")

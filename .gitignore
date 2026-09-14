@@ -24,6 +24,10 @@ test-footage/
 scratch/
 scratchpad/
 
+# Nothing needs one today, but if a .env shows up later it must not land in the repo.
+.env
+*.env
+
 # Python
 __pycache__/
 *.py[cod]

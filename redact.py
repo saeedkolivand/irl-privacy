@@ -1,7 +1,7 @@
 """Video redaction: find Redaction Targets, blur them, Backfill new ones into the Privacy Buffer.
 
 Detection runs on the GPU through onnxruntime (CUDA): YuNet face (MIT), PP-OCRv3 DB text
-(Apache-2.0), YOLOv8s barcode/QR (AGPL-3.0). Never reads text, only locates it (ADR 0001, D3).
+(Apache-2.0), YOLOv8s barcode/QR (AGPL-3.0). Never reads text, only locates it (ADR 0001).
 
     python redact.py bench                    # per-detector ms on one 720x1280 frame
     python redact.py clip IN.mp4 OUT.mp4      # redact a clip, same logic as the live buffer
@@ -29,7 +29,7 @@ NEAR = 0.30             # a box spanning this much of the frame counts as "close
 # Padding is applied to EVERY side, so p grows a box to (1 + 2p) times its width. A parcel is
 # roughly 2-3x its label, so ~0.45 is the whole-parcel grow; 1.20 made one close label cover the
 # entire frame, which then tripped the coverage Blackout on essentially every frame.
-NEAR_PAD = 0.45         # extra padding at full proximity, to swallow the whole parcel (D3)
+NEAR_PAD = 0.45         # extra padding at full proximity, to swallow the whole parcel
 MAX_PAD = 0.15          # but never grow a box by more than this share of the frame, per side
 BACKFILL = 45           # frames a newly-seen target is painted backwards (1.5 s at 30 fps)
 EVERY = 1               # detect on every Nth frame; the GPU stack affords every frame
@@ -162,7 +162,8 @@ class Detectors:
     def text_regions(self, frame):
         """DB emits a text-probability map; every blob in it is a Redaction Target."""
         # One C call for resize + mean + scale + NCHW. The three ImageNet stds differ by ~1%, so a
-        # single scalar stands in for them; validate_port.py confirms recall is unchanged.
+        # single scalar stands in for them, checked against the reference preprocessing with no
+        # measurable recall loss.
         blob = cv2.dnn.blobFromImage(frame, 1.0 / 57.63, TEXT_SIZE, (123.675, 116.28, 103.53))
         prob = self.text_s.run(None, {self.text_s.get_inputs()[0].name: blob})[0]
         mask = (np.squeeze(prob) > DB_THRESH).astype(np.uint8)
@@ -191,7 +192,7 @@ class Detectors:
 
     def detect(self, frame):
         # Codes are stickers on static objects, so a third of the rate costs nothing in practice
-        # and Backfill covers the gaps. It is also the weakest detector -- see PHASE2 notes.
+        # and Backfill covers the gaps. It is also the weakest of the three detectors.
         self.n += 1
         if self.n % CODE_EVERY == 0:
             self.held_codes = self.codes(frame)
@@ -208,7 +209,7 @@ def quality(frame):
 
 
 def quality_bad(frame):
-    """Auto Trigger: too dark or too motion-blurred for detection to be trusted (D7)."""
+    """Auto Trigger: too dark or too motion-blurred for detection to be trusted."""
     luma, sharp = quality(frame)
     return bool(luma < DARK or sharp < SHARP)
 

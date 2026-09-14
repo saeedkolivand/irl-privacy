@@ -115,12 +115,14 @@ def selftest():
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--host", default="100.124.231.50", help="Tailscale IP of this PC")
+    p.add_argument("--host", help="Tailscale IP of this PC")
     p.add_argument("--port", type=int, default=8766)
     p.add_argument("--selftest", action="store_true")
     a = p.parse_args()
     if a.selftest:
         return selftest()
+    if not a.host:
+        p.error("--host is required, e.g. 100.x.x.x (your Tailscale IP)")
     DEST.mkdir(parents=True, exist_ok=True)
     print(f"upload page: http://{a.host}:{a.port}/\nsaving to {DEST}")
     try:

@@ -1,0 +1,28 @@
+name: selftest
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  selftest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          # Runners have no GPU. --selftest never builds a CUDA session (no Detectors/Speech
+          # instantiated), it just needs onnxruntime to *import* -- swap the CUDA wheel for the
+          # CPU one so it does, without touching the pin real usage needs.
+          pip uninstall -y onnxruntime-gpu
+          pip install onnxruntime
+      - name: Run self-checks
+        run: |
+          python redact.py --selftest
+          python speech.py --selftest
+          python upload.py --selftest
+          python relay.py --selftest
