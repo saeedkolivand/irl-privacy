@@ -58,8 +58,14 @@ document.getElementById('f').onchange = async e => {
 
 
 def safe_name(raw):
-    """Keep the basename only, and only characters that cannot escape the folder."""
-    name = re.sub(r"[^A-Za-z0-9._-]", "_", Path(unquote(raw)).name).lstrip(".")
+    """Keep the basename only, and only characters that cannot escape the folder.
+
+    Split on both slash directions by hand rather than Path(...).name: pathlib only treats
+    backslash as a separator on Windows, so a backslash-laden name that should be stripped down
+    to its basename passed through whole on Linux -- caught by CI running this on Linux while
+    the server itself only ever runs on Windows."""
+    base = unquote(raw).replace("\\", "/").rsplit("/", 1)[-1]
+    name = re.sub(r"[^A-Za-z0-9._-]", "_", base).lstrip(".")
     return name[:120] or "clip.mp4"
 
 
