@@ -14,12 +14,11 @@ jobs:
           python-version: "3.14"
       - name: Install dependencies
         run: |
-          pip install -r requirements.txt
-          # Runners have no GPU. --selftest never builds a CUDA session (no Detectors/Speech
-          # instantiated), it just needs onnxruntime to *import* -- swap the CUDA wheel for the
-          # CPU one so it does, without touching the pin real usage needs.
-          pip uninstall -y onnxruntime-gpu
-          pip install onnxruntime
+          # Runners have no GPU, and onnxruntime-gpu installs into the same import path as
+          # plain onnxruntime -- installing both then uninstalling one deletes files the
+          # other needs too. So skip the GPU wheel: faster-whisper already pulls in plain
+          # onnxruntime, which is all --selftest needs (it never builds a CUDA session).
+          grep -v onnxruntime-gpu requirements.txt | pip install -r /dev/stdin
       - name: Run self-checks
         run: |
           python redact.py --selftest
