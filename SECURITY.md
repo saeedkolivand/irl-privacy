@@ -9,6 +9,10 @@ the same tailnet. Tailnet membership *is* the auth. Do not put either port on a 
 behind a reverse proxy, or on a LAN you don't trust — there is nothing else standing between an
 attacker and blanking your stream or dropping files on your disk.
 
+`/raw` on that same port turns redaction off entirely, so anyone on the tailnet can unblur
+your stream, not merely blank it. If you share a tailnet with people you would not hand the
+camera to, move `--panic-port` somewhere they are not looking, or keep it off their nodes.
+
 The RTMP ingest in `relay.py` has the same property: it accepts one publisher, unauthenticated,
 on whatever address `--listen` binds to. Same rule applies.
 

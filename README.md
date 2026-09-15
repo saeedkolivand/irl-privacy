@@ -32,6 +32,7 @@ detection falls back to the CPU (far below 30 fps) and audio is silenced wholesa
 - [Prerequisites](#prerequisites)
 - [Quick start](#quick-start)
 - [Panic](#panic)
+- [Turning redaction off](#turning-redaction-off)
 - [Checking it](#checking-it)
 - [Known gaps](#known-gaps)
 - [Tuning](#tuning)
@@ -122,6 +123,19 @@ by accident un-hides the thing you panicked about. If both are heard at once, en
 
 Both endpoints bind to the Tailscale address and have no auth of their own — reaching them already
 means being on the tailnet. See `SECURITY.md`.
+
+## Turning redaction off
+
+Sometimes there is nobody else in frame and nothing to hide. `redaction off` stops all of it —
+no blur, no Bleep, and no Auto Trigger either, so a dark or blurry frame airs as it is.
+
+- off: say **"redaction off"** (two adjacent words), or `GET :8765/raw`
+- on: say **"redact"**, or `GET :8765/redact`
+
+The friction runs the opposite way to a Panic, for the same reason. Turning it off is the only
+command here that can expose somebody else, so it takes a phrase; going back to redacted is one
+word. If both are heard at once, redacting wins, and a Panic cancels it outright — so "all clear"
+never drops you back into an unredacted stream. While it is on the status line reads `** RAW **`.
 
 ## Checking it
 

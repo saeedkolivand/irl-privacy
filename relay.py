@@ -59,21 +59,36 @@ class Panic:
     is exactly the part you are usually reacting to. It only releases on a deliberate request:
     a voice command could engage it by accident, and the safe accident is the one that hides more."""
 
-    def __init__(self):
-        self.on, self.since = False, None
+    ENGAGED = "** PANIC engaged ({why}) -- the buffer is blanked until you clear it"
+    RELEASED = "** panic cleared after {secs:.0f}s"
+
+    def __init__(self, cancels=None):
+        self.on, self.since, self.cancels = False, None, cancels
 
     def engage(self, why):
         if not self.on:
             self.on, self.since = True, time.monotonic()
-            print(f"** PANIC engaged ({why}) -- the buffer is blanked until you clear it", flush=True)
+            print(self.ENGAGED.format(why=why), flush=True)
+            if self.cancels:
+                self.cancels.release()   # a Panic must never release back into an unredacted stream
 
     def release(self):
         if self.on:
-            print(f"** panic cleared after {time.monotonic() - self.since:.0f}s", flush=True)
+            print(self.RELEASED.format(secs=time.monotonic() - self.since), flush=True)
         self.on, self.since = False, None
 
 
-def serve_panic(panic, host, port):
+class Raw(Panic):
+    """Redaction off by request: no blur, no Bleep, no Auto Trigger. The same latch as a Panic and
+    the exact opposite of one, so it is deliberately the harder thing to turn on and the easier
+    thing to turn off. A Panic outranks it and cancels it, because the one moment you reach for a
+    Panic is the one moment an unredacted stream is the wrong thing to go back to."""
+
+    ENGAGED = '** REDACTION OFF ({why}) -- nothing is blurred or muted. Say "redact" to resume'
+    RELEASED = "** redaction back on after {secs:.0f}s"
+
+
+def serve_panic(panic, raw, host, port):
     """A GET-only endpoint so an iPhone Shortcut needs nothing but a URL. No auth of its own:
     it binds to the Tailscale address, so reaching it at all means being on the tailnet."""
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -85,7 +100,11 @@ def serve_panic(panic, host, port):
                 panic.engage("phone")
             elif path.endswith("/clear"):
                 panic.release()
-            body = (b"PANIC\n" if panic.on else b"clear\n")
+            elif path.endswith("/raw"):
+                raw.engage("phone")
+            elif path.endswith("/redact"):
+                raw.release()
+            body = (b"PANIC\n" if panic.on else b"RAW -- redaction off\n" if raw.on else b"clear\n")
             self.send_response(200)
             self.send_header("Content-Type", "text/plain")
             self.send_header("Content-Length", str(len(body)))
@@ -156,7 +175,7 @@ def ingest(url, buf, t0, pipe, ears):
             print(f"ingest: {e!r}")
 
 
-def emit(url, buf, ears, panic):
+def emit(url, buf, ears, panic, raw):
     out = av.open(url, "w", format="mpegts")
     v = out.add_stream("h264_nvenc", rate=FPS, options={"preset": "p4", "tune": "ll", "bf": "0", "g": str(FPS * 2)})
     v.width, v.height, v.pix_fmt, v.bit_rate = W, H, "yuv420p", 6_000_000
@@ -176,7 +195,10 @@ def emit(url, buf, ears, panic):
                 stats["blackout"] += bad
                 stats["boxes"] += len(boxes)
                 t = time.monotonic()
-                burned, why = redact.burn(payload, boxes, bad or panic.on)
+                if raw.on and not panic.on:
+                    burned, why = payload, ""     # off by request: no blur, and no Auto Trigger either
+                else:
+                    burned, why = redact.burn(payload, boxes, bad or panic.on)
                 if why:
                     stats[f"why_{why}"] += 1
                 t2 = time.monotonic()
@@ -191,7 +213,7 @@ def emit(url, buf, ears, panic):
                 gap = int(ms * RATE / 1000) - samples
                 if gap < -RATE // 10:
                     continue  # audio ahead of the clock after a re-anchor: drop
-                if panic.on or ears.muted(ms, ms + payload.samples / RATE * 1000):
+                if panic.on or (not raw.on and ears.muted(ms, ms + payload.samples / RATE * 1000)):
                     payload = av.AudioFrame.from_ndarray(
                         np.zeros((2, payload.samples), np.float32), format="fltp", layout="stereo")
                     stats["bleeped"] += 1
@@ -214,7 +236,8 @@ def emit(url, buf, ears, panic):
                   f"enc {stats['enc_ms'] / m:5.1f} ms | boxes {stats['boxes'] / m:4.1f} | "
                   f"luma {stats['luma'] / n:5.1f} sharp {stats['sharp'] / n:7.1f} | black: "
                   f"trust {stats['why_trust']:4d} count {stats['why_count']:4d} cover {stats['why_cover']:4d} "
-                  f"| {'** PANIC **' if panic.on else 'live'} | {stats['dropped']:4d} drop | audio: {stats['bleeped']:4d} muted "
+                  f"| {'** PANIC **' if panic.on else '** RAW **' if raw.on else 'live'} "
+                  f"| {stats['dropped']:4d} drop | audio: {stats['bleeped']:4d} muted "
                   f"{ears.stats['bleeps']:3d} bleeps {ears.stats['overrun'] + ears.stats['failed']:2d} fallback")
             last_log = now
             stats.clear()
@@ -257,6 +280,13 @@ def selftest():
     p.engage("retro")
     assert redact.burn(np.zeros((8, 8, 3), np.uint8), [], False or p.on)[1] == "trust"
 
+    r = Raw()
+    pr = Panic(cancels=r)
+    r.engage("test")
+    assert r.on, "redaction can be turned off"
+    pr.engage("test")
+    assert not r.on, "a panic must not release back into an unredacted stream"
+
     assert (ip := tailscale_ip()) is None or ip.startswith("100.")
 
     speech.selftest()
@@ -298,20 +328,24 @@ def main():
         print("!! --debug-words is ON: transcribed speech is being written to this log")
     buf, t0 = collections.deque(), time.monotonic()
     pipe = redact.Pipeline(W, H)
-    panic = Panic()
+    raw = Raw()
+    panic = Panic(cancels=raw)
     try:
-        ears = speech.Speech(on_keyword=lambda: panic.engage("voice"), on_clear=panic.release)
+        ears = speech.Speech(on_keyword=lambda: panic.engage("voice"), on_clear=panic.release,
+                             on_raw=lambda: raw.engage("voice"), on_redact=raw.release)
     except Exception as e:      # no transcription means no way to know what is being said
         print(f"!! speech redaction unavailable ({e!r}) -- ALL AUDIO WILL BE SILENCED")
         ears = MuteAll()
     host = urllib.parse.urlparse(args.listen).hostname or "127.0.0.1"
-    threading.Thread(target=serve_panic, args=(panic, host, args.panic_port), daemon=True).start()
+    threading.Thread(target=serve_panic, args=(panic, raw, host, args.panic_port), daemon=True).start()
     print(f"listening for the phone on {args.listen}\nclean feed -> {args.out}\n"
           f"panic: http://{host}:{args.panic_port}/panic   clear: http://{host}:{args.panic_port}/clear\n"
           f"or say {' / '.join(sorted(speech.KEYWORDS))} to engage, "
-          f"\"{' '.join(speech.CLEAR_PHRASE)}\" to release")
+          f"\"{' '.join(speech.CLEAR_PHRASE)}\" to release\n"
+          f"redaction off: say \"{' '.join(speech.RAW_PHRASE)}\" or GET :{args.panic_port}/raw   "
+          f"back on: say \"{speech.REDACT_WORD}\" or GET :{args.panic_port}/redact")
     threading.Thread(target=ingest, args=(args.listen, buf, t0, pipe, ears), daemon=True).start()
-    emit(args.out, buf, ears, panic)
+    emit(args.out, buf, ears, panic, raw)
 
 
 if __name__ == "__main__":

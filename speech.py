@@ -54,6 +54,11 @@ KEYWORDS = {"privacy", "blackout"}
 # Releasing needs a two-word phrase, not a single word. Engaging by accident costs you a grey
 # stream; releasing by accident un-hides whatever you panicked about, so this side wants friction.
 CLEAR_PHRASE = ("all", "clear")
+# Turning redaction off wholesale is the one command where a mishearing exposes somebody else, so
+# it takes a two-word phrase and the way back is a single word -- the friction runs the opposite
+# way to a Panic, because here it is stopping that is dangerous and resuming that is safe.
+RAW_PHRASE = ("redaction", "off")
+REDACT_WORD = "redact"
 
 DIGIT = re.compile(r"\d")
 
@@ -122,11 +127,23 @@ def heard_keyword(segments):
     return any(w in KEYWORDS for w in _bare_words(segments))
 
 
+def _heard_phrase(words, phrase):
+    return any(tuple(words[i:i + len(phrase)]) == phrase for i in range(len(words) - len(phrase) + 1))
+
+
 def heard_clear(segments):
     """True when the release phrase was spoken, as consecutive words."""
-    words = _bare_words(segments)
-    return any(tuple(words[i:i + len(CLEAR_PHRASE)]) == CLEAR_PHRASE
-               for i in range(len(words) - len(CLEAR_PHRASE) + 1))
+    return _heard_phrase(_bare_words(segments), CLEAR_PHRASE)
+
+
+def heard_raw(segments):
+    """True when redaction was asked to stop entirely, as consecutive words."""
+    return _heard_phrase(_bare_words(segments), RAW_PHRASE)
+
+
+def heard_redact(segments):
+    """True when redaction was asked back on. One word, because resuming is the safe direction."""
+    return REDACT_WORD in _bare_words(segments)
 
 
 def merge_spans(spans):
@@ -147,10 +164,12 @@ def overlaps(spans, a, b):
 class Speech:
     """Accumulates buffered audio, transcribes it on a worker thread, and reports what to silence."""
 
-    def __init__(self, model="small", language="en", on_keyword=None, on_clear=None):
+    def __init__(self, model="small", language="en", on_keyword=None, on_clear=None,
+                 on_raw=None, on_redact=None):
         # Pinned to one language on purpose: auto-detect runs per chunk, and a live test had it
         # flip mid-sentence and hallucinate Portuguese. Change this if you stream in another one.
         self.on_keyword, self.on_clear = on_keyword, on_clear
+        self.on_raw, self.on_redact = on_raw, on_redact
         _enable_cuda12()
         from faster_whisper import WhisperModel      # imported late: it pulls in CUDA libraries
         self.model = WhisperModel(model, device="cuda", compute_type="int8_float16")
@@ -199,6 +218,13 @@ class Speech:
                 if self.on_keyword and heard_keyword(segs):
                     self.stats["keyword"] += 1
                     self.on_keyword()
+                # Same order for the same reason: said in one breath, redacting wins.
+                if self.on_redact and heard_redact(segs):
+                    self.stats["redact"] += 1
+                    self.on_redact()
+                if self.on_raw and heard_raw(segs):
+                    self.stats["raw"] += 1
+                    self.on_raw()
                 if DEBUG:
                     self._show(segs, found, t_ms)
             except Exception as e:                    # fail closed: unreadable audio is silenced
@@ -267,6 +293,13 @@ def selftest():
     split = type("S", (), {"words": [word("all", 0.0, 0.3), word("of", 0.4, 0.6),
                                      word("clear", 0.7, 0.9)]})()
     assert not heard_clear([split]), "the two words must be adjacent, not merely both present"
+
+    off = type("S", (), {"words": [word("Redaction", 0.0, 0.4), word("off.", 0.5, 0.8)]})()
+    assert heard_raw([off]), "the two words stop redaction"
+    assert not heard_raw([kw]) and not heard_raw([dull]), "ordinary speech does not stop redaction"
+    assert not heard_redact([off]), '"redaction" must not also read as the single word "redact"'
+    back = type("S", (), {"words": [word("Redact", 0.0, 0.4)]})()
+    assert heard_redact([back]), "one word puts redaction back on"
     print("selftest ok")
 
 
