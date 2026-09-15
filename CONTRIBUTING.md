@@ -7,7 +7,7 @@ Before opening a PR:
 
 - Run the self-checks: `python relay.py --selftest`, `python redact.py --selftest`,
   `python speech.py --selftest`, `python upload.py --selftest` (the first cascades into the other
-  two). CI runs the same commands.
+  two), or `.\start.ps1 -Selftest` to run all four. CI runs the same commands.
 - If you change a threshold or add a rule with a real-footage failure case behind it, add an
   assertion for it in the relevant `selftest()` — that's the whole test suite, and it's how past
   regressions stay fixed.

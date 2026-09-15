@@ -2,13 +2,15 @@
 
 Open it in Safari over Tailscale and pick clips from the Photos library. Files land in
 test-footage/real/. Like the panic endpoint it has no auth of its own: it binds to the Tailscale
-address, so being able to reach it already means being on the tainet.
+address, so being able to reach it already means being on the tailnet.
 
     python upload.py                 # serve on the Tailscale IP
     python upload.py --selftest
 """
 import argparse
+import ipaddress
 import re
+import socket
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -116,19 +118,34 @@ def selftest():
     assert safe_name("%2e%2e%2fsecret.mp4") == "secret.mp4", "url-encoded traversal too"
     assert safe_name("") == "clip.mp4" and safe_name("...") == "clip.mp4"
     assert "/" not in safe_name("a/b/c.mp4") and "\\" not in safe_name("a\\b.mp4")
+    assert (ip := tailscale_ip()) is None or ip.startswith("100.")
     print("selftest ok")
+
+
+def tailscale_ip():
+    """This PC's tailnet address, so the phone-facing URLs never have to be typed by hand.
+
+    Asks the routing table rather than the host name, which on Linux answers 127.0.1.1."""
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        try:
+            s.connect(("100.100.100.100", 80))      # Tailscale's resolver: routed only when up
+            ip = s.getsockname()[0]                 # a UDP connect() picks a route, sends nothing
+        except OSError:
+            return None
+    return ip if ipaddress.ip_address(ip) in ipaddress.ip_network("100.64.0.0/10") else None
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--host", help="Tailscale IP of this PC")
+    p.add_argument("--host", default=tailscale_ip(),
+                   help="Tailscale IP of this PC (default: auto-detected)")
     p.add_argument("--port", type=int, default=8766)
     p.add_argument("--selftest", action="store_true")
     a = p.parse_args()
     if a.selftest:
         return selftest()
     if not a.host:
-        p.error("--host is required, e.g. 100.x.x.x (your Tailscale IP)")
+        p.error("no Tailscale IP found -- is Tailscale up? Otherwise pass --host 100.x.x.x")
     DEST.mkdir(parents=True, exist_ok=True)
     print(f"upload page: http://{a.host}:{a.port}/\nsaving to {DEST}")
     try:

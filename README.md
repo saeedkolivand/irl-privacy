@@ -21,7 +21,9 @@ Glasses ──DAT 720x1280──▶ iPhone (StreamHand) ──RTMP over Tailscal
 Everything runs on one PC with an NVIDIA GPU. The phone never holds a platform stream key, so if
 the link dies the stream shows a BRB scene rather than an unredacted feed.
 
-Windows only (paths and setup below assume `py` and PowerShell/cmd).
+Built for Windows. It starts and self-checks on macOS and Linux too, but without an NVIDIA GPU
+detection falls back to the CPU (far below 30 fps) and audio is silenced wholesale, because
+`speech.py` only builds a CUDA transcriber.
 
 ## Contents
 
@@ -61,7 +63,7 @@ See `docs/adr/0001-fail-closed-lookahead-before-obs.md`.
 
 ## Prerequisites
 
-- Windows PC with an NVIDIA GPU (CUDA) — this is where detection, blur, and encode all run
+- A PC with an NVIDIA GPU (CUDA) — this is where detection, blur, and encode all run
 - Python 3.14 (see `.python-version`)
 - [Tailscale](https://tailscale.com/), signed into the same account on the PC and the phone
 - A phone RTMP app with no built-in delay, e.g. StreamHand or Streamlabs Mobile
@@ -69,23 +71,44 @@ See `docs/adr/0001-fail-closed-lookahead-before-obs.md`.
 
 ## Quick start
 
-```bash
-py -3.14 -m venv .venv
-.venv\Scripts\python -m pip install -r requirements.txt
-.venv\Scripts\python -m pip install "onnxruntime-gpu[cuda,cudnn]"   # after the CPU build, to win
-.venv\Scripts\python fetch_models.py
+```powershell
+.\start.ps1             # first run builds the venv and fetches the models, then relays
+.\start.ps1 -Upload     # also serves the phone -> PC upload page for test footage
+.\start.ps1 -Selftest   # the self-checks, no stream
 ```
 
+macOS, Linux, and Git Bash on Windows get the same thing as a shell script:
+
+```bash
+./start.sh              # first run builds the venv and fetches the models, then relays
+./start.sh --upload     # also serves the phone -> PC upload page for test footage
+./start.sh --selftest   # the self-checks, no stream
+```
+
+It prints the RTMP URL to point the phone at — `--listen` and `--host` default to this PC's
+Tailscale IP, so there is nothing to look up. The first run installs ~7 GB of CUDA and torch
+wheels and takes a while; later runs start straight away.
+
 Then on the phone: Tailscale signed into the same account, and StreamHand (or Streamlabs Mobile)
-pointed at `rtmp://<your-tailscale-ip>:1935/live` with any stream key.
+pointed at the URL the relay printed, with any stream key.
 
 In OBS: a Media Source with *local file* unchecked and input `udp://127.0.0.1:9000`, plus a BRB
 scene. Set the Streamlabs alert delay to 3 s so alerts land with the delayed video.
 
-```bash
-.venv\Scripts\python relay.py --listen rtmp://<your-tailscale-ip>:1935/live
-.venv\Scripts\python upload.py --host <your-tailscale-ip>   # optional: phone -> PC upload page for test footage
+<details><summary>Or by hand, without the script</summary>
+
+```powershell
+py -3.14 -m venv .venv                                              # python3.14 on macOS/Linux
+.venv\Scripts\python -m pip install -r requirements.txt             # .venv/bin/python elsewhere
+.venv\Scripts\python -m pip install "onnxruntime-gpu[cuda,cudnn]"   # after the CPU build, to win
+.venv\Scripts\python -m pip install ultralytics                     # export-time only, for the barcode model
+.venv\Scripts\python fetch_models.py
+.venv\Scripts\python relay.py
 ```
+
+Skip the `onnxruntime-gpu` line on macOS — there are no CUDA wheels for it.
+
+</details>
 
 ## Panic
 
@@ -102,7 +125,8 @@ means being on the tailnet. See `SECURITY.md`.
 
 ## Checking it
 
-```bash
+```powershell
+.\start.ps1 -Selftest             # every self-check, no stream (./start.sh --selftest elsewhere)
 python relay.py --selftest        # runs relay + redact + speech checks
 python redact.py bench            # per-detector ms
 python redact.py clip IN.mp4 OUT.mp4

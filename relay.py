@@ -8,6 +8,8 @@ not aired yet. Frames are burned only on the way out (ADR 0001). Run `python rel
 """
 import argparse
 import collections
+import ipaddress
+import socket
 import threading
 import time
 import urllib.parse
@@ -255,14 +257,31 @@ def selftest():
     p.engage("retro")
     assert redact.burn(np.zeros((8, 8, 3), np.uint8), [], False or p.on)[1] == "trust"
 
+    assert (ip := tailscale_ip()) is None or ip.startswith("100.")
+
     speech.selftest()
     redact.selftest()
     print("selftest ok")
 
 
+def tailscale_ip():
+    """This PC's tailnet address, so the phone-facing URLs never have to be typed by hand.
+
+    Asks the routing table rather than the host name, which on Linux answers 127.0.1.1."""
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        try:
+            s.connect(("100.100.100.100", 80))      # Tailscale's resolver: routed only when up
+            ip = s.getsockname()[0]                 # a UDP connect() picks a route, sends nothing
+        except OSError:
+            return None
+    return ip if ipaddress.ip_address(ip) in ipaddress.ip_network("100.64.0.0/10") else None
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--listen", help="RTMP URL the phone publishes to, e.g. rtmp://<your-tailscale-ip>:1935/live")
+    ts = tailscale_ip()
+    p.add_argument("--listen", default=f"rtmp://{ts}:1935/live" if ts else None,
+                   help="RTMP URL the phone publishes to (default: this PC's Tailscale IP)")
     p.add_argument("--out", default="udp://127.0.0.1:9000?pkt_size=1316", help="Clean Feed destination for OBS")
     p.add_argument("--panic-port", type=int, default=8765, help="port for the panic endpoint")
     p.add_argument("--debug-words", action="store_true",
@@ -272,7 +291,8 @@ def main():
     if args.selftest:
         return selftest()
     if not args.listen:
-        p.error("--listen is required, e.g. rtmp://<your-tailscale-ip>:1935/live")
+        p.error("no Tailscale IP found -- is Tailscale up? Otherwise pass "
+                "--listen rtmp://<your-tailscale-ip>:1935/live")
     if args.debug_words:
         speech.DEBUG = True
         print("!! --debug-words is ON: transcribed speech is being written to this log")
